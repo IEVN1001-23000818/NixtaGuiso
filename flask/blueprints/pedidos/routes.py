@@ -1,0 +1,422 @@
+import os
+import re
+from datetime import datetime
+
+from flask import Blueprint, request, jsonify, session, current_app
+from werkzeug.utils import secure_filename
+
+from database import mysql
+from utils.seguridad import cliente_requerido
+from utils.precios import obtener_tipo_cliente
+from utils.pedidos import ErrorPedido, leer_productos, calcular_pedido, descontar_inventario
+
+pedidos_bp = Blueprint('pedidos', __name__)
+
+PATRON_TELEFONO = re.compile(r'^[0-9]{10}$')
+EXTENSIONES_COMPROBANTE = {'jpg', 'jpeg', 'png', 'pdf'}
+
+# Tiempo estimado que se muestra al confirmar (maquetado del Módulo 3)
+TIEMPO_ESTIMADO_B2C = 'Recibirás tu pedido en aproximadamente 40 minutos'
+TIEMPO_ESTIMADO_B2B = 'Tu pedido se entregará en la ruta matutina de 6:30 a 10:00 a. m.'
+
+
+# ---------------------------------------------------------------------
+#  FUNCIONES DE APOYO
+# ---------------------------------------------------------------------
+
+def respuesta_calculo(calculo):
+    """Quita los datos internos antes de enviar el cálculo a Angular."""
+    datos = dict(calculo)
+    datos.pop('requeridos', None)
+    datos.pop('id_cupon', None)
+    return datos
+
+
+def validar_tarjeta(tarjeta):
+    """Pasarela en modo de prueba: solo valida el formato. No se guarda nada."""
+    if not isinstance(tarjeta, dict):
+        raise ErrorPedido('Captura los datos de la tarjeta')
+
+    numero = re.sub(r'\s|-', '', str(tarjeta.get('numero', '')))
+    vencimiento = str(tarjeta.get('vencimiento', '')).strip()
+    cvv = str(tarjeta.get('cvv', '')).strip()
+
+    if not re.fullmatch(r'[0-9]{16}', numero):
+        raise ErrorPedido('El número de tarjeta debe tener 16 dígitos')
+
+    coincide = re.fullmatch(r'(0[1-9]|1[0-2])/([0-9]{2})', vencimiento)
+    if not coincide:
+        raise ErrorPedido('La fecha de vencimiento debe tener el formato MM/AA')
+
+    mes, anio = int(coincide.group(1)), 2000 + int(coincide.group(2))
+    hoy = datetime.now()
+    if (anio, mes) < (hoy.year, hoy.month):
+        raise ErrorPedido('La tarjeta está vencida')
+
+    if not re.fullmatch(r'[0-9]{3,4}', cvv):
+        raise ErrorPedido('El CVV debe tener 3 o 4 dígitos')
+
+
+def obtener_pedido_propio(cursor, id_pedido):
+    """Regresa el pedido solo si pertenece al cliente con sesión."""
+    cursor.execute(
+        "SELECT * FROM pedidos WHERE id_pedido = %s AND id_cliente = %s",
+        (id_pedido, session['id_cliente'])
+    )
+    return cursor.fetchone()
+
+
+# ---------------------------------------------------------------------
+#  CALCULAR EL CARRITO (no guarda nada)
+# ---------------------------------------------------------------------
+
+@pedidos_bp.route('/api/pedidos/calcular', methods=['POST'])
+@cliente_requerido
+def calcular():
+    cursor = None
+
+    try:
+        datos = request.get_json(silent=True) or {}
+        cantidades = leer_productos(datos)
+
+        cursor = mysql.connection.cursor()
+        tipo, nivel = obtener_tipo_cliente(cursor)
+
+        calculo = calcular_pedido(
+            cursor, session['id_cliente'], tipo, nivel, cantidades,
+            modalidad=datos.get('modalidad', 'domicilio'),
+            codigo_cupon=datos.get('codigo_cupon', ''),
+            usar_saldo=bool(datos.get('usar_saldo', False))
+        )
+
+        return jsonify({'exito': True, **respuesta_calculo(calculo)}), 200
+
+    except ErrorPedido as e:
+        return jsonify({'exito': False, 'mensaje': e.mensaje}), e.codigo
+
+    except Exception as e:
+        print("ERROR AL CALCULAR PEDIDO:", str(e))
+        return jsonify({'exito': False, 'mensaje': 'No se pudo calcular el pedido'}), 500
+
+    finally:
+        if cursor:
+            cursor.close()
+
+
+# ---------------------------------------------------------------------
+#  CONFIRMAR PEDIDO
+# ---------------------------------------------------------------------
+
+@pedidos_bp.route('/api/pedidos', methods=['POST'])
+@cliente_requerido
+def crear_pedido():
+    cursor = None
+
+    try:
+        datos = request.get_json(silent=True) or {}
+        cantidades = leer_productos(datos)
+
+        modalidad = datos.get('modalidad', 'domicilio')
+        direccion = str(datos.get('direccion_entrega', '') or '').strip()
+        telefono = str(datos.get('telefono_contacto', '') or '').strip()
+        metodo_pago = datos.get('metodo_pago')
+        notas = str(datos.get('notas', '') or '').strip()
+
+        # VALIDACIONES DE ENTREGA Y PAGO
+        if modalidad == 'domicilio' and len(direccion) < 5:
+            raise ErrorPedido('Escribe la dirección de entrega')
+
+        if not PATRON_TELEFONO.match(telefono):
+            raise ErrorPedido('El teléfono de contacto debe tener 10 dígitos')
+
+        if metodo_pago not in ('tarjeta', 'transferencia'):
+            raise ErrorPedido('Selecciona el método de pago')
+
+        if metodo_pago == 'tarjeta':
+            validar_tarjeta(datos.get('tarjeta'))
+            estado_pago = 'pagado'
+        else:
+            estado_pago = 'por_validar'
+
+        cursor = mysql.connection.cursor()
+        tipo, nivel = obtener_tipo_cliente(cursor)
+
+        # CALCULO CON LAS FILAS APARTADAS (FOR UPDATE)
+        calculo = calcular_pedido(
+            cursor, session['id_cliente'], tipo, nivel, cantidades,
+            modalidad=modalidad,
+            codigo_cupon=datos.get('codigo_cupon', ''),
+            usar_saldo=bool(datos.get('usar_saldo', False)),
+            bloquear=True
+        )
+
+        if not calculo['cumple_minimo']:
+            raise ErrorPedido(calculo['mensaje_minimo'])
+
+        if calculo['faltantes']:
+            nombres = ', '.join(f['nombre'] for f in calculo['faltantes'])
+            raise ErrorPedido(f"No hay existencia suficiente de: {nombres}", 409)
+
+        # GUARDAR PEDIDO
+        cursor.execute("""
+            INSERT INTO pedidos
+            (id_cliente, id_cupon, tipo_cliente, modalidad, direccion_entrega,
+             telefono_contacto, subtotal, descuento, costo_envio, saldo_aplicado,
+             total, metodo_pago, estado_pago, notas)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        """, (
+            session['id_cliente'],
+            calculo['id_cupon'],
+            tipo,
+            modalidad,
+            direccion if modalidad == 'domicilio' else None,
+            telefono,
+            calculo['subtotal'],
+            calculo['descuento'],
+            calculo['costo_envio'],
+            calculo['saldo_aplicado'],
+            calculo['total'],
+            metodo_pago,
+            estado_pago,
+            notas or None
+        ))
+        id_pedido = cursor.lastrowid
+
+        # GUARDAR DETALLE (el precio se copia tal cual se cobró)
+        for linea in calculo['lineas']:
+            cursor.execute("""
+                INSERT INTO detalle_pedido (id_pedido, id_producto, cantidad, precio_unitario, subtotal)
+                VALUES (%s, %s, %s, %s, %s)
+            """, (id_pedido, linea['id_producto'], linea['cantidad'],
+                  linea['precio_unitario'], linea['subtotal']))
+
+        # DESCONTAR INVENTARIO Y SALDO
+        descontar_inventario(cursor, calculo['requeridos'])
+
+        if calculo['saldo_aplicado'] > 0:
+            cursor.execute(
+                "UPDATE clientes SET saldo_favor = saldo_favor - %s WHERE id_cliente = %s",
+                (calculo['saldo_aplicado'], session['id_cliente'])
+            )
+
+        # AVISO PARA EL CLIENTE
+        mensaje_pago = 'Pago aprobado.' if estado_pago == 'pagado' else \
+            'Sube tu comprobante de transferencia para validar el pago.'
+        cursor.execute("""
+            INSERT INTO notificaciones (id_usuario, titulo, mensaje)
+            VALUES (%s, %s, %s)
+        """, (session['id_usuario'], f"Pedido #{id_pedido} recibido", mensaje_pago))
+
+        mysql.connection.commit()
+
+        return jsonify({
+            'exito': True,
+            'mensaje': 'Pedido registrado correctamente',
+            'id_pedido': id_pedido,
+            'estado_pago': estado_pago,
+            'tiempo_estimado': TIEMPO_ESTIMADO_B2B if tipo == 'B2B' else TIEMPO_ESTIMADO_B2C,
+            'total': calculo['total']
+        }), 201
+
+    except ErrorPedido as e:
+        mysql.connection.rollback()
+        return jsonify({'exito': False, 'mensaje': e.mensaje}), e.codigo
+
+    except Exception as e:
+        print("ERROR AL CREAR PEDIDO:", str(e))
+        mysql.connection.rollback()
+        return jsonify({'exito': False, 'mensaje': 'No se pudo registrar el pedido'}), 500
+
+    finally:
+        if cursor:
+            cursor.close()
+
+
+# ---------------------------------------------------------------------
+#  HISTORIAL DE PEDIDOS DEL CLIENTE
+# ---------------------------------------------------------------------
+
+@pedidos_bp.route('/api/pedidos', methods=['GET'])
+@cliente_requerido
+def mis_pedidos():
+    cursor = None
+
+    try:
+        cursor = mysql.connection.cursor()
+
+        cursor.execute("""
+            SELECT p.id_pedido, p.fecha_pedido, p.estado, p.estado_pago,
+                   p.metodo_pago, p.modalidad, p.total,
+                   GROUP_CONCAT(CONCAT(TRIM(TRAILING '.' FROM TRIM(TRAILING '0' FROM d.cantidad)), ' ', pr.nombre)
+                                ORDER BY d.id_detalle SEPARATOR ', ') AS resumen
+            FROM pedidos p
+            JOIN detalle_pedido d ON d.id_pedido = p.id_pedido
+            JOIN productos pr ON pr.id_producto = d.id_producto
+            WHERE p.id_cliente = %s
+            GROUP BY p.id_pedido, p.fecha_pedido, p.estado, p.estado_pago,
+                     p.metodo_pago, p.modalidad, p.total
+            ORDER BY p.fecha_pedido DESC, p.id_pedido DESC
+        """, (session['id_cliente'],))
+
+        pedidos = []
+        for fila in cursor.fetchall():
+            pedidos.append({
+                'id_pedido': fila['id_pedido'],
+                'fecha_pedido': fila['fecha_pedido'].strftime('%Y-%m-%d %H:%M'),
+                'estado': fila['estado'],
+                'estado_pago': fila['estado_pago'],
+                'metodo_pago': fila['metodo_pago'],
+                'modalidad': fila['modalidad'],
+                'total': float(fila['total']),
+                'resumen': fila['resumen']
+            })
+
+        return jsonify({'exito': True, 'pedidos': pedidos}), 200
+
+    except Exception as e:
+        print("ERROR AL LISTAR PEDIDOS:", str(e))
+        return jsonify({'exito': False, 'mensaje': 'No se pudieron obtener los pedidos'}), 500
+
+    finally:
+        if cursor:
+            cursor.close()
+
+
+# ---------------------------------------------------------------------
+#  DETALLE DE UN PEDIDO
+# ---------------------------------------------------------------------
+
+@pedidos_bp.route('/api/pedidos/<int:id_pedido>', methods=['GET'])
+@cliente_requerido
+def detalle_pedido(id_pedido):
+    cursor = None
+
+    try:
+        cursor = mysql.connection.cursor()
+        pedido = obtener_pedido_propio(cursor, id_pedido)
+
+        if not pedido:
+            return jsonify({'exito': False, 'mensaje': 'El pedido no existe'}), 404
+
+        cursor.execute("""
+            SELECT d.id_producto, pr.nombre, pr.presentacion, d.cantidad,
+                   d.precio_unitario, d.subtotal
+            FROM detalle_pedido d
+            JOIN productos pr ON pr.id_producto = d.id_producto
+            WHERE d.id_pedido = %s
+            ORDER BY d.id_detalle
+        """, (id_pedido,))
+        productos = [{
+            'id_producto': d['id_producto'],
+            'nombre': d['nombre'],
+            'presentacion': d['presentacion'],
+            'cantidad': float(d['cantidad']),
+            'precio_unitario': float(d['precio_unitario']),
+            'subtotal': float(d['subtotal'])
+        } for d in cursor.fetchall()]
+
+        repartidor = None
+        if pedido['id_repartidor']:
+            cursor.execute(
+                "SELECT nombre, telefono, placas FROM repartidores WHERE id_repartidor = %s",
+                (pedido['id_repartidor'],)
+            )
+            repartidor = cursor.fetchone()
+
+        cursor.execute(
+            "SELECT estrellas, comentario FROM calificaciones WHERE id_pedido = %s",
+            (id_pedido,)
+        )
+        calificacion = cursor.fetchone()
+
+        return jsonify({
+            'exito': True,
+            'pedido': {
+                'id_pedido': pedido['id_pedido'],
+                'fecha_pedido': pedido['fecha_pedido'].strftime('%Y-%m-%d %H:%M'),
+                'estado': pedido['estado'],
+                'modalidad': pedido['modalidad'],
+                'direccion_entrega': pedido['direccion_entrega'],
+                'telefono_contacto': pedido['telefono_contacto'],
+                'metodo_pago': pedido['metodo_pago'],
+                'estado_pago': pedido['estado_pago'],
+                'tiene_comprobante': pedido['comprobante_url'] is not None,
+                'subtotal': float(pedido['subtotal']),
+                'descuento': float(pedido['descuento']),
+                'costo_envio': float(pedido['costo_envio']),
+                'saldo_aplicado': float(pedido['saldo_aplicado']),
+                'total': float(pedido['total']),
+                'notas': pedido['notas'],
+                'productos': productos,
+                'repartidor': repartidor,
+                'calificacion': calificacion,
+                'puede_calificar': pedido['estado'] == 'entregado' and calificacion is None
+            }
+        }), 200
+
+    except Exception as e:
+        print("ERROR EN DETALLE DE PEDIDO:", str(e))
+        return jsonify({'exito': False, 'mensaje': 'No se pudo obtener el pedido'}), 500
+
+    finally:
+        if cursor:
+            cursor.close()
+
+
+# ---------------------------------------------------------------------
+#  SUBIR COMPROBANTE DE TRANSFERENCIA (archivo: campo "comprobante")
+# ---------------------------------------------------------------------
+
+@pedidos_bp.route('/api/pedidos/<int:id_pedido>/comprobante', methods=['POST'])
+@cliente_requerido
+def subir_comprobante(id_pedido):
+    cursor = None
+
+    try:
+        cursor = mysql.connection.cursor()
+        pedido = obtener_pedido_propio(cursor, id_pedido)
+
+        if not pedido:
+            return jsonify({'exito': False, 'mensaje': 'El pedido no existe'}), 404
+
+        if pedido['metodo_pago'] != 'transferencia':
+            return jsonify({'exito': False, 'mensaje': 'Este pedido no se pagó por transferencia'}), 400
+
+        if pedido['estado_pago'] == 'pagado':
+            return jsonify({'exito': False, 'mensaje': 'El pago de este pedido ya fue validado'}), 400
+
+        archivo = request.files.get('comprobante')
+        if not archivo or archivo.filename == '':
+            return jsonify({'exito': False, 'mensaje': 'Selecciona el archivo del comprobante'}), 400
+
+        extension = archivo.filename.rsplit('.', 1)[-1].lower() if '.' in archivo.filename else ''
+        if extension not in EXTENSIONES_COMPROBANTE:
+            return jsonify({'exito': False, 'mensaje': 'El comprobante debe ser JPG, PNG o PDF'}), 400
+
+        carpeta = os.path.join(current_app.root_path, current_app.config['UPLOAD_FOLDER'], 'comprobantes')
+        os.makedirs(carpeta, exist_ok=True)
+
+        nombre_archivo = secure_filename(
+            f"pedido_{id_pedido}_{datetime.now().strftime('%Y%m%d%H%M%S')}.{extension}"
+        )
+        archivo.save(os.path.join(carpeta, nombre_archivo))
+
+        cursor.execute("""
+            UPDATE pedidos SET comprobante_url = %s, estado_pago = 'por_validar'
+            WHERE id_pedido = %s
+        """, (f"comprobantes/{nombre_archivo}", id_pedido))
+        mysql.connection.commit()
+
+        return jsonify({
+            'exito': True,
+            'mensaje': 'Comprobante recibido. Validaremos tu pago en breve.'
+        }), 200
+
+    except Exception as e:
+        print("ERROR AL SUBIR COMPROBANTE:", str(e))
+        mysql.connection.rollback()
+        return jsonify({'exito': False, 'mensaje': 'No se pudo subir el comprobante'}), 500
+
+    finally:
+        if cursor:
+            cursor.close()

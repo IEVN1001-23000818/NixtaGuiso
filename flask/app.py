@@ -6,6 +6,8 @@ from config import config
 
 from blueprints.auth.routes import auth_bp
 from blueprints.catalogo.routes import catalogo_bp
+from blueprints.pedidos.routes import pedidos_bp
+from blueprints.perfil.routes import perfil_bp
 
 
 app = Flask(__name__)
@@ -26,6 +28,8 @@ CORS(app, origins=["http://localhost:4200"], supports_credentials=True)
 # REGISTRAR BLUEPRINTS
 app.register_blueprint(auth_bp)
 app.register_blueprint(catalogo_bp)
+app.register_blueprint(pedidos_bp)
+app.register_blueprint(perfil_bp)
 
 
 @app.route('/')
