@@ -1,0 +1,86 @@
+from flask import Flask, jsonify
+from flask_cors import CORS
+
+from database import mysql
+from config import config
+
+
+app = Flask(__name__)
+
+# CONFIGURACION
+app.config.from_mapping(config["development"])
+
+# MYSQL
+mysql.init_app(app)
+
+# PERMITIR CONEXION DESDE ANGULAR
+# supports_credentials=True permite que viaje la cookie de la sesión (login)
+CORS(app, origins=["http://localhost:4200"], supports_credentials=True)
+
+# REGISTRAR BLUEPRINTS
+# (se irán agregando en los siguientes pasos)
+
+
+@app.route('/')
+def inicio():
+    return "Servidor de NixtaGuiso funcionando"
+
+
+# RUTA DE PRUEBA: confirma que Flask se conecta a la base nixtaguiso
+@app.route('/api/salud', methods=['GET'])
+def salud():
+    cursor = None
+
+    try:
+        cursor = mysql.connection.cursor()
+
+        cursor.execute("""
+            SELECT COUNT(*) AS tablas
+            FROM information_schema.tables
+            WHERE table_schema = DATABASE()
+        """)
+        tablas = cursor.fetchone()['tablas']
+
+        cursor.execute("SELECT COUNT(*) AS productos FROM productos")
+        productos = cursor.fetchone()['productos']
+
+        return jsonify({
+            'exito': True,
+            'mensaje': 'Flask conectado a MySQL correctamente',
+            'base_de_datos': app.config['MYSQL_DB'],
+            'tablas': tablas,
+            'productos': productos
+        }), 200
+
+    except Exception as e:
+        print("ERROR DE CONEXION:", str(e))
+
+        return jsonify({
+            'exito': False,
+            'mensaje': 'No se pudo conectar a MySQL: ' + str(e)
+        }), 500
+
+    finally:
+        if cursor:
+            cursor.close()
+
+
+# RESPUESTAS DE ERROR EN FORMATO JSON
+@app.errorhandler(404)
+def no_encontrado(error):
+    return jsonify({
+        'exito': False,
+        'mensaje': 'La ruta solicitada no existe'
+    }), 404
+
+
+@app.errorhandler(405)
+def metodo_no_permitido(error):
+    return jsonify({
+        'exito': False,
+        'mensaje': 'Método no permitido para esta ruta'
+    }), 405
+
+
+if __name__ == '__main__':
+    app.run(debug=True, port=5000)

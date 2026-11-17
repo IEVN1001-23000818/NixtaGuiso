@@ -14,3 +14,4 @@ angular/**/.angular/
 .DS_Store
 Thumbs.db
 .vscode/
+flask/config.py
