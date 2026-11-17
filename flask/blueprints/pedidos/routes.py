@@ -247,14 +247,16 @@ def mis_pedidos():
         cursor.execute("""
             SELECT p.id_pedido, p.fecha_pedido, p.estado, p.estado_pago,
                    p.metodo_pago, p.modalidad, p.total,
+                   (p.estado = 'entregado' AND cal.id_calificacion IS NULL) AS puede_calificar,
                    GROUP_CONCAT(CONCAT(TRIM(TRAILING '.' FROM TRIM(TRAILING '0' FROM d.cantidad)), ' ', pr.nombre)
                                 ORDER BY d.id_detalle SEPARATOR ', ') AS resumen
             FROM pedidos p
             JOIN detalle_pedido d ON d.id_pedido = p.id_pedido
             JOIN productos pr ON pr.id_producto = d.id_producto
+            LEFT JOIN calificaciones cal ON cal.id_pedido = p.id_pedido
             WHERE p.id_cliente = %s
             GROUP BY p.id_pedido, p.fecha_pedido, p.estado, p.estado_pago,
-                     p.metodo_pago, p.modalidad, p.total
+                     p.metodo_pago, p.modalidad, p.total, cal.id_calificacion
             ORDER BY p.fecha_pedido DESC, p.id_pedido DESC
         """, (session['id_cliente'],))
 
@@ -268,7 +270,8 @@ def mis_pedidos():
                 'metodo_pago': fila['metodo_pago'],
                 'modalidad': fila['modalidad'],
                 'total': float(fila['total']),
-                'resumen': fila['resumen']
+                'resumen': fila['resumen'],
+                'puede_calificar': bool(fila['puede_calificar'])
             })
 
         return jsonify({'exito': True, 'pedidos': pedidos}), 200
@@ -416,6 +419,57 @@ def subir_comprobante(id_pedido):
         print("ERROR AL SUBIR COMPROBANTE:", str(e))
         mysql.connection.rollback()
         return jsonify({'exito': False, 'mensaje': 'No se pudo subir el comprobante'}), 500
+
+    finally:
+        if cursor:
+            cursor.close()
+
+
+# ---------------------------------------------------------------------
+#  CALIFICAR UN PEDIDO ENTREGADO (1 a 5 estrellas)
+# ---------------------------------------------------------------------
+
+@pedidos_bp.route('/api/pedidos/<int:id_pedido>/calificacion', methods=['POST'])
+@cliente_requerido
+def calificar_pedido(id_pedido):
+    cursor = None
+
+    try:
+        datos = request.get_json(silent=True) or {}
+        estrellas = datos.get('estrellas')
+        comentario = str(datos.get('comentario', '') or '').strip()
+
+        if not isinstance(estrellas, int) or not 1 <= estrellas <= 5:
+            return jsonify({'exito': False, 'mensaje': 'La calificación debe ser de 1 a 5 estrellas'}), 400
+
+        if len(comentario) > 500:
+            return jsonify({'exito': False, 'mensaje': 'El comentario debe tener máximo 500 caracteres'}), 400
+
+        cursor = mysql.connection.cursor()
+        pedido = obtener_pedido_propio(cursor, id_pedido)
+
+        if not pedido:
+            return jsonify({'exito': False, 'mensaje': 'El pedido no existe'}), 404
+
+        if pedido['estado'] != 'entregado':
+            return jsonify({'exito': False, 'mensaje': 'Solo puedes calificar pedidos entregados'}), 400
+
+        cursor.execute("SELECT 1 FROM calificaciones WHERE id_pedido = %s", (id_pedido,))
+        if cursor.fetchone():
+            return jsonify({'exito': False, 'mensaje': 'Este pedido ya fue calificado'}), 409
+
+        cursor.execute("""
+            INSERT INTO calificaciones (id_pedido, estrellas, comentario)
+            VALUES (%s, %s, %s)
+        """, (id_pedido, estrellas, comentario or None))
+        mysql.connection.commit()
+
+        return jsonify({'exito': True, 'mensaje': '¡Gracias por tu calificación!'}), 201
+
+    except Exception as e:
+        print("ERROR AL CALIFICAR PEDIDO:", str(e))
+        mysql.connection.rollback()
+        return jsonify({'exito': False, 'mensaje': 'No se pudo guardar la calificación'}), 500
 
     finally:
         if cursor:

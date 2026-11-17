@@ -1,7 +1,9 @@
 from flask import Blueprint, request, jsonify, session
 
 from database import mysql
-from utils.seguridad import cliente_requerido
+from utils.seguridad import cliente_requerido, login_requerido
+from utils.precios import obtener_tipo_cliente, nombre_tarifa
+from blueprints.catalogo.routes import CONSULTA_PRODUCTOS, armar_producto
 from blueprints.auth.routes import obtener_usuario, PATRON_CORREO, PATRON_TELEFONO, PATRON_RFC
 
 perfil_bp = Blueprint('perfil', __name__)
@@ -139,6 +141,207 @@ def editar_perfil():
         print("ERROR AL EDITAR PERFIL:", str(e))
         mysql.connection.rollback()
         return jsonify({'exito': False, 'mensaje': 'No se pudo actualizar el perfil'}), 500
+
+    finally:
+        if cursor:
+            cursor.close()
+
+
+# =====================================================================
+#  FAVORITOS
+# =====================================================================
+
+@perfil_bp.route('/api/favoritos', methods=['GET'])
+@cliente_requerido
+def listar_favoritos():
+    cursor = None
+
+    try:
+        cursor = mysql.connection.cursor()
+        tipo, nivel = obtener_tipo_cliente(cursor)
+
+        # Misma consulta del catálogo, solo con los productos marcados
+        cursor.execute(
+            CONSULTA_PRODUCTOS + " AND f.id_producto IS NOT NULL ORDER BY f.fecha DESC",
+            (session['id_cliente'],)
+        )
+        favoritos = [armar_producto(fila, tipo, nivel) for fila in cursor.fetchall()]
+
+        return jsonify({
+            'exito': True,
+            'tarifa': nombre_tarifa(tipo, nivel),
+            'favoritos': favoritos
+        }), 200
+
+    except Exception as e:
+        print("ERROR AL LISTAR FAVORITOS:", str(e))
+        return jsonify({'exito': False, 'mensaje': 'No se pudieron obtener los favoritos'}), 500
+
+    finally:
+        if cursor:
+            cursor.close()
+
+
+@perfil_bp.route('/api/favoritos', methods=['POST'])
+@cliente_requerido
+def agregar_favorito():
+    cursor = None
+
+    try:
+        datos = request.get_json(silent=True) or {}
+        id_producto = datos.get('id_producto')
+
+        if not isinstance(id_producto, int):
+            return jsonify({'exito': False, 'mensaje': 'Indica el producto'}), 400
+
+        cursor = mysql.connection.cursor()
+
+        cursor.execute("""
+            SELECT 1 FROM productos
+            WHERE id_producto = %s AND activo = TRUE AND es_paquete = FALSE
+        """, (id_producto,))
+        if not cursor.fetchone():
+            return jsonify({'exito': False, 'mensaje': 'El producto no existe'}), 404
+
+        # INSERT IGNORE: si ya era favorito, no marca error
+        cursor.execute("""
+            INSERT IGNORE INTO favoritos (id_cliente, id_producto) VALUES (%s, %s)
+        """, (session['id_cliente'], id_producto))
+        mysql.connection.commit()
+
+        return jsonify({'exito': True, 'mensaje': 'Agregado a favoritos'}), 201
+
+    except Exception as e:
+        print("ERROR AL AGREGAR FAVORITO:", str(e))
+        mysql.connection.rollback()
+        return jsonify({'exito': False, 'mensaje': 'No se pudo agregar a favoritos'}), 500
+
+    finally:
+        if cursor:
+            cursor.close()
+
+
+@perfil_bp.route('/api/favoritos/<int:id_producto>', methods=['DELETE'])
+@cliente_requerido
+def quitar_favorito(id_producto):
+    cursor = None
+
+    try:
+        cursor = mysql.connection.cursor()
+        cursor.execute(
+            "DELETE FROM favoritos WHERE id_cliente = %s AND id_producto = %s",
+            (session['id_cliente'], id_producto)
+        )
+        mysql.connection.commit()
+
+        return jsonify({'exito': True, 'mensaje': 'Quitado de favoritos'}), 200
+
+    except Exception as e:
+        print("ERROR AL QUITAR FAVORITO:", str(e))
+        mysql.connection.rollback()
+        return jsonify({'exito': False, 'mensaje': 'No se pudo quitar de favoritos'}), 500
+
+    finally:
+        if cursor:
+            cursor.close()
+
+
+# =====================================================================
+#  NOTIFICACIONES
+# =====================================================================
+
+@perfil_bp.route('/api/notificaciones', methods=['GET'])
+@login_requerido
+def listar_notificaciones():
+    cursor = None
+
+    try:
+        cursor = mysql.connection.cursor()
+
+        cursor.execute("""
+            SELECT id_notificacion, titulo, mensaje, leida, fecha
+            FROM notificaciones
+            WHERE id_usuario = %s
+            ORDER BY fecha DESC, id_notificacion DESC
+            LIMIT 50
+        """, (session['id_usuario'],))
+
+        notificaciones = [{
+            'id_notificacion': n['id_notificacion'],
+            'titulo': n['titulo'],
+            'mensaje': n['mensaje'],
+            'leida': bool(n['leida']),
+            'fecha': n['fecha'].strftime('%Y-%m-%d %H:%M')
+        } for n in cursor.fetchall()]
+
+        return jsonify({
+            'exito': True,
+            'no_leidas': sum(1 for n in notificaciones if not n['leida']),
+            'notificaciones': notificaciones
+        }), 200
+
+    except Exception as e:
+        print("ERROR AL LISTAR NOTIFICACIONES:", str(e))
+        return jsonify({'exito': False, 'mensaje': 'No se pudieron obtener los avisos'}), 500
+
+    finally:
+        if cursor:
+            cursor.close()
+
+
+@perfil_bp.route('/api/notificaciones/<int:id_notificacion>/leida', methods=['PUT'])
+@login_requerido
+def marcar_leida(id_notificacion):
+    cursor = None
+
+    try:
+        cursor = mysql.connection.cursor()
+
+        # El aviso debe pertenecer al usuario con sesión
+        cursor.execute(
+            "SELECT 1 FROM notificaciones WHERE id_notificacion = %s AND id_usuario = %s",
+            (id_notificacion, session['id_usuario'])
+        )
+        if not cursor.fetchone():
+            return jsonify({'exito': False, 'mensaje': 'El aviso no existe'}), 404
+
+        cursor.execute(
+            "UPDATE notificaciones SET leida = TRUE WHERE id_notificacion = %s",
+            (id_notificacion,)
+        )
+        mysql.connection.commit()
+
+        return jsonify({'exito': True, 'mensaje': 'Aviso marcado como leído'}), 200
+
+    except Exception as e:
+        print("ERROR AL MARCAR AVISO:", str(e))
+        mysql.connection.rollback()
+        return jsonify({'exito': False, 'mensaje': 'No se pudo actualizar el aviso'}), 500
+
+    finally:
+        if cursor:
+            cursor.close()
+
+
+@perfil_bp.route('/api/notificaciones/leer-todas', methods=['PUT'])
+@login_requerido
+def marcar_todas_leidas():
+    cursor = None
+
+    try:
+        cursor = mysql.connection.cursor()
+        cursor.execute(
+            "UPDATE notificaciones SET leida = TRUE WHERE id_usuario = %s AND leida = FALSE",
+            (session['id_usuario'],)
+        )
+        mysql.connection.commit()
+
+        return jsonify({'exito': True, 'mensaje': 'Todos los avisos marcados como leídos'}), 200
+
+    except Exception as e:
+        print("ERROR AL MARCAR AVISOS:", str(e))
+        mysql.connection.rollback()
+        return jsonify({'exito': False, 'mensaje': 'No se pudieron actualizar los avisos'}), 500
 
     finally:
         if cursor:

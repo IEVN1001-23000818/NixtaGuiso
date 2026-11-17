@@ -8,6 +8,7 @@ from blueprints.auth.routes import auth_bp
 from blueprints.catalogo.routes import catalogo_bp
 from blueprints.pedidos.routes import pedidos_bp
 from blueprints.perfil.routes import perfil_bp
+from blueprints.programaciones.routes import programaciones_bp
 
 
 app = Flask(__name__)
@@ -30,6 +31,7 @@ app.register_blueprint(auth_bp)
 app.register_blueprint(catalogo_bp)
 app.register_blueprint(pedidos_bp)
 app.register_blueprint(perfil_bp)
+app.register_blueprint(programaciones_bp)
 
 
 @app.route('/')
