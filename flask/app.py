@@ -5,6 +5,7 @@ from database import mysql
 from config import config
 
 from blueprints.auth.routes import auth_bp
+from blueprints.catalogo.routes import catalogo_bp
 
 
 app = Flask(__name__)
@@ -24,6 +25,7 @@ CORS(app, origins=["http://localhost:4200"], supports_credentials=True)
 
 # REGISTRAR BLUEPRINTS
 app.register_blueprint(auth_bp)
+app.register_blueprint(catalogo_bp)
 
 
 @app.route('/')
