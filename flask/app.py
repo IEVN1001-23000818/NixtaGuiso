@@ -1,4 +1,6 @@
-from flask import Flask, jsonify
+import os
+
+from flask import Flask, jsonify, send_from_directory
 from flask_cors import CORS
 
 from database import mysql
@@ -9,6 +11,9 @@ from blueprints.catalogo.routes import catalogo_bp
 from blueprints.pedidos.routes import pedidos_bp
 from blueprints.perfil.routes import perfil_bp
 from blueprints.programaciones.routes import programaciones_bp
+from blueprints.admin_productos.routes import admin_productos_bp
+from blueprints.admin_clientes.routes import admin_clientes_bp
+from blueprints.admin_despacho.routes import admin_despacho_bp
 
 
 app = Flask(__name__)
@@ -32,6 +37,17 @@ app.register_blueprint(catalogo_bp)
 app.register_blueprint(pedidos_bp)
 app.register_blueprint(perfil_bp)
 app.register_blueprint(programaciones_bp)
+app.register_blueprint(admin_productos_bp)
+app.register_blueprint(admin_clientes_bp)
+app.register_blueprint(admin_despacho_bp)
+
+
+# FOTOS DE PRODUCTOS (públicas, para mostrarlas en el catálogo)
+# Los comprobantes de pago NO se publican aquí.
+@app.route('/uploads/productos/<path:archivo>')
+def foto_producto(archivo):
+    carpeta = os.path.join(app.root_path, app.config['UPLOAD_FOLDER'], 'productos')
+    return send_from_directory(carpeta, archivo)
 
 
 @app.route('/')
