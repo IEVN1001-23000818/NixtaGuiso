@@ -7,6 +7,9 @@
 --  existe y la crea de nuevo. Úsenlo solo en desarrollo.
 -- =====================================================================
 
+-- Asegura que acentos y ñ se guarden correctamente al importar
+SET NAMES utf8mb4;
+
 DROP DATABASE IF EXISTS nixtaguiso;
 CREATE DATABASE nixtaguiso
   CHARACTER SET utf8mb4

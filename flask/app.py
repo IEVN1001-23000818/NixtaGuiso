@@ -4,11 +4,16 @@ from flask_cors import CORS
 from database import mysql
 from config import config
 
+from blueprints.auth.routes import auth_bp
+
 
 app = Flask(__name__)
 
 # CONFIGURACION
 app.config.from_mapping(config["development"])
+
+# Mostrar acentos y ñ tal cual en las respuestas JSON
+app.json.ensure_ascii = False
 
 # MYSQL
 mysql.init_app(app)
@@ -18,7 +23,7 @@ mysql.init_app(app)
 CORS(app, origins=["http://localhost:4200"], supports_credentials=True)
 
 # REGISTRAR BLUEPRINTS
-# (se irán agregando en los siguientes pasos)
+app.register_blueprint(auth_bp)
 
 
 @app.route('/')
