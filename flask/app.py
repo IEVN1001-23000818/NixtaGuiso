@@ -15,6 +15,7 @@ from blueprints.admin_productos.routes import admin_productos_bp
 from blueprints.admin_clientes.routes import admin_clientes_bp
 from blueprints.admin_despacho.routes import admin_despacho_bp
 from blueprints.admin_inventario.routes import admin_inventario_bp
+from blueprints.admin_dashboard.routes import admin_dashboard_bp
 
 
 app = Flask(__name__)
@@ -42,6 +43,7 @@ app.register_blueprint(admin_productos_bp)
 app.register_blueprint(admin_clientes_bp)
 app.register_blueprint(admin_despacho_bp)
 app.register_blueprint(admin_inventario_bp)
+app.register_blueprint(admin_dashboard_bp)
 
 
 # FOTOS DE PRODUCTOS (públicas, para mostrarlas en el catálogo)
