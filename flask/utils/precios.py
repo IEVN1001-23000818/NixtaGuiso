@@ -9,6 +9,18 @@ from flask import session
 # =====================================================================
 
 
+def tipo_de_cliente(cursor, id_cliente):
+    """Regresa (tipo, nivel) de un cliente específico. Lo usa el panel administrativo."""
+    cursor.execute(
+        "SELECT tipo, nivel_b2b FROM clientes WHERE id_cliente = %s",
+        (id_cliente,)
+    )
+    cliente = cursor.fetchone()
+    if not cliente:
+        return 'B2C', None
+    return cliente['tipo'], cliente['nivel_b2b']
+
+
 def obtener_tipo_cliente(cursor):
     """
     Revisa la sesión y regresa (tipo, nivel).
@@ -20,16 +32,7 @@ def obtener_tipo_cliente(cursor):
     if not id_cliente:
         return 'B2C', None
 
-    cursor.execute(
-        "SELECT tipo, nivel_b2b FROM clientes WHERE id_cliente = %s",
-        (id_cliente,)
-    )
-    cliente = cursor.fetchone()
-
-    if not cliente:
-        return 'B2C', None
-
-    return cliente['tipo'], cliente['nivel_b2b']
+    return tipo_de_cliente(cursor, id_cliente)
 
 
 def precio_para(producto, tipo, nivel):

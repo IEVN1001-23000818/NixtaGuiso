@@ -8,7 +8,7 @@ from werkzeug.utils import secure_filename
 from database import mysql
 from utils.seguridad import cliente_requerido
 from utils.precios import obtener_tipo_cliente
-from utils.pedidos import ErrorPedido, leer_productos, calcular_pedido, descontar_inventario
+from utils.pedidos import ErrorPedido, leer_productos, calcular_pedido, insertar_pedido
 
 pedidos_bp = Blueprint('pedidos', __name__)
 
@@ -157,55 +157,11 @@ def crear_pedido():
             nombres = ', '.join(f['nombre'] for f in calculo['faltantes'])
             raise ErrorPedido(f"No hay existencia suficiente de: {nombres}", 409)
 
-        # GUARDAR PEDIDO
-        cursor.execute("""
-            INSERT INTO pedidos
-            (id_cliente, id_cupon, tipo_cliente, modalidad, direccion_entrega,
-             telefono_contacto, subtotal, descuento, costo_envio, saldo_aplicado,
-             total, metodo_pago, estado_pago, notas)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-        """, (
-            session['id_cliente'],
-            calculo['id_cupon'],
-            tipo,
-            modalidad,
-            direccion if modalidad == 'domicilio' else None,
-            telefono,
-            calculo['subtotal'],
-            calculo['descuento'],
-            calculo['costo_envio'],
-            calculo['saldo_aplicado'],
-            calculo['total'],
-            metodo_pago,
-            estado_pago,
-            notas or None
-        ))
-        id_pedido = cursor.lastrowid
-
-        # GUARDAR DETALLE (el precio se copia tal cual se cobró)
-        for linea in calculo['lineas']:
-            cursor.execute("""
-                INSERT INTO detalle_pedido (id_pedido, id_producto, cantidad, precio_unitario, subtotal)
-                VALUES (%s, %s, %s, %s, %s)
-            """, (id_pedido, linea['id_producto'], linea['cantidad'],
-                  linea['precio_unitario'], linea['subtotal']))
-
-        # DESCONTAR INVENTARIO Y SALDO
-        descontar_inventario(cursor, calculo['requeridos'])
-
-        if calculo['saldo_aplicado'] > 0:
-            cursor.execute(
-                "UPDATE clientes SET saldo_favor = saldo_favor - %s WHERE id_cliente = %s",
-                (calculo['saldo_aplicado'], session['id_cliente'])
-            )
-
-        # AVISO PARA EL CLIENTE
-        mensaje_pago = 'Pago aprobado.' if estado_pago == 'pagado' else \
-            'Sube tu comprobante de transferencia para validar el pago.'
-        cursor.execute("""
-            INSERT INTO notificaciones (id_usuario, titulo, mensaje)
-            VALUES (%s, %s, %s)
-        """, (session['id_usuario'], f"Pedido #{id_pedido} recibido", mensaje_pago))
+        # GUARDAR PEDIDO, DETALLE, INVENTARIO, SALDO Y AVISO
+        id_pedido = insertar_pedido(
+            cursor, session['id_cliente'], session['id_usuario'], calculo,
+            modalidad, direccion, telefono, metodo_pago, estado_pago, notas or None
+        )
 
         mysql.connection.commit()
 

@@ -12,6 +12,7 @@ KG_MINIMO_TORTILLA_B2B = 5         # kg de tortilla por entrega
 COSTO_ENVIO_B2C = 30.00
 ENVIO_GRATIS_DESDE = 250.00
 DESCUENTO_PRIMER_PEDIDO = 15       # por ciento, solo clientes Hogar
+BONO_REFERIDO = 20.00              # saldo para quien invita y para el invitado
 
 
 class ErrorPedido(Exception):
@@ -231,3 +232,122 @@ def descontar_inventario(cursor, requeridos):
             "UPDATE productos SET existencia = existencia - %s WHERE id_producto = %s",
             (cantidad, id_producto)
         )
+
+
+def insertar_pedido(cursor, id_cliente, id_usuario, calculo, modalidad, direccion,
+                    telefono, metodo_pago, estado_pago, notas=None, id_programacion=None):
+    """
+    Guarda un pedido ya calculado: encabezado, detalle, inventario, saldo
+    y aviso. Lo usan el pedido del cliente y los pedidos programados.
+    No hace commit: quien llama decide.
+    """
+    cursor.execute("""
+        INSERT INTO pedidos
+        (id_cliente, id_programacion, id_cupon, tipo_cliente, modalidad,
+         direccion_entrega, telefono_contacto, subtotal, descuento, costo_envio,
+         saldo_aplicado, total, metodo_pago, estado_pago, notas)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+    """, (
+        id_cliente, id_programacion, calculo['id_cupon'], calculo['tipo_cliente'],
+        modalidad, direccion if modalidad == 'domicilio' else None, telefono,
+        calculo['subtotal'], calculo['descuento'], calculo['costo_envio'],
+        calculo['saldo_aplicado'], calculo['total'], metodo_pago, estado_pago, notas
+    ))
+    id_pedido = cursor.lastrowid
+
+    # El precio se copia tal cual se cobró
+    for linea in calculo['lineas']:
+        cursor.execute("""
+            INSERT INTO detalle_pedido (id_pedido, id_producto, cantidad, precio_unitario, subtotal)
+            VALUES (%s, %s, %s, %s, %s)
+        """, (id_pedido, linea['id_producto'], linea['cantidad'],
+              linea['precio_unitario'], linea['subtotal']))
+
+    descontar_inventario(cursor, calculo['requeridos'])
+
+    if calculo['saldo_aplicado'] > 0:
+        cursor.execute(
+            "UPDATE clientes SET saldo_favor = saldo_favor - %s WHERE id_cliente = %s",
+            (calculo['saldo_aplicado'], id_cliente)
+        )
+
+    mensaje = 'Pago aprobado.' if estado_pago == 'pagado' else \
+        'Sube tu comprobante de transferencia para validar el pago.'
+    notificar(cursor, id_usuario, f"Pedido #{id_pedido} recibido", mensaje)
+
+    return id_pedido
+
+
+def reponer_inventario(cursor, id_pedido):
+    """Regresa al inventario lo que se había descontado (al cancelar)."""
+    cursor.execute("""
+        SELECT d.id_producto, d.cantidad, p.es_paquete
+        FROM detalle_pedido d
+        JOIN productos p ON p.id_producto = d.id_producto
+        WHERE d.id_pedido = %s
+    """, (id_pedido,))
+
+    for linea in cursor.fetchall():
+        if linea['es_paquete']:
+            cursor.execute(
+                "SELECT id_producto, cantidad FROM paquete_componentes WHERE id_paquete = %s",
+                (linea['id_producto'],)
+            )
+            for componente in cursor.fetchall():
+                cursor.execute(
+                    "UPDATE productos SET existencia = existencia + %s WHERE id_producto = %s",
+                    (float(componente['cantidad']) * float(linea['cantidad']), componente['id_producto'])
+                )
+        else:
+            cursor.execute(
+                "UPDATE productos SET existencia = existencia + %s WHERE id_producto = %s",
+                (linea['cantidad'], linea['id_producto'])
+            )
+
+
+def notificar(cursor, id_usuario, titulo, mensaje):
+    cursor.execute("""
+        INSERT INTO notificaciones (id_usuario, titulo, mensaje) VALUES (%s, %s, %s)
+    """, (id_usuario, titulo, mensaje))
+
+
+def otorgar_bono_referido(cursor, id_cliente):
+    """
+    Si es el primer pedido entregado de un cliente invitado, da el bono a
+    ambos una sola vez. Se llama justo después de marcar un pedido como
+    entregado. Regresa True si se otorgó el bono.
+    """
+    cursor.execute("""
+        SELECT c.id_usuario, c.id_referido_por, c.bono_referido_otorgado,
+               cr.id_usuario AS id_usuario_invitador
+        FROM clientes c
+        LEFT JOIN clientes cr ON cr.id_cliente = c.id_referido_por
+        WHERE c.id_cliente = %s
+        FOR UPDATE
+    """, (id_cliente,))
+    cliente = cursor.fetchone()
+
+    if not cliente or not cliente['id_referido_por'] or cliente['bono_referido_otorgado']:
+        return False
+
+    cursor.execute("""
+        SELECT COUNT(*) AS entregados FROM pedidos
+        WHERE id_cliente = %s AND estado = 'entregado'
+    """, (id_cliente,))
+    if cursor.fetchone()['entregados'] != 1:
+        return False
+
+    cursor.execute("""
+        UPDATE clientes SET saldo_favor = saldo_favor + %s, bono_referido_otorgado = TRUE
+        WHERE id_cliente = %s
+    """, (BONO_REFERIDO, id_cliente))
+    cursor.execute(
+        "UPDATE clientes SET saldo_favor = saldo_favor + %s WHERE id_cliente = %s",
+        (BONO_REFERIDO, cliente['id_referido_por'])
+    )
+
+    notificar(cursor, cliente['id_usuario'], '¡Ganaste saldo!',
+              f"Recibiste ${BONO_REFERIDO:.0f} de saldo por tu primer pedido como invitado.")
+    notificar(cursor, cliente['id_usuario_invitador'], '¡Tu invitado hizo su primer pedido!',
+              f"Recibiste ${BONO_REFERIDO:.0f} de saldo por recomendar NixtaGuiso.")
+    return True
