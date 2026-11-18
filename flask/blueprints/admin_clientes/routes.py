@@ -3,6 +3,7 @@ from flask import Blueprint, request, jsonify
 from database import mysql
 from utils.seguridad import admin_requerido
 from utils.validaciones import ErrorValidacion, texto, booleano
+from utils.ubicacion import a_numero
 
 admin_clientes_bp = Blueprint('admin_clientes', __name__)
 
@@ -151,6 +152,8 @@ def ficha_cliente(id_cliente):
                 'rfc': c['rfc'],
                 'nivel_b2b': c['nivel_b2b'],
                 'direccion': c['direccion'],
+                'latitud': a_numero(c['latitud']),
+                'longitud': a_numero(c['longitud']),
                 'preferencias': c['preferencias'],
                 'saldo_favor': float(c['saldo_favor']),
                 'codigo_referido': c['codigo_referido'],

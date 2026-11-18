@@ -235,7 +235,8 @@ def descontar_inventario(cursor, requeridos):
 
 
 def insertar_pedido(cursor, id_cliente, id_usuario, calculo, modalidad, direccion,
-                    telefono, metodo_pago, estado_pago, notas=None, id_programacion=None):
+                    telefono, metodo_pago, estado_pago, notas=None, id_programacion=None,
+                    latitud=None, longitud=None):
     """
     Guarda un pedido ya calculado: encabezado, detalle, inventario, saldo
     y aviso. Lo usan el pedido del cliente y los pedidos programados.
@@ -244,12 +245,14 @@ def insertar_pedido(cursor, id_cliente, id_usuario, calculo, modalidad, direccio
     cursor.execute("""
         INSERT INTO pedidos
         (id_cliente, id_programacion, id_cupon, tipo_cliente, modalidad,
-         direccion_entrega, telefono_contacto, subtotal, descuento, costo_envio,
-         saldo_aplicado, total, metodo_pago, estado_pago, notas)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+         direccion_entrega, latitud, longitud, telefono_contacto, subtotal,
+         descuento, costo_envio, saldo_aplicado, total, metodo_pago, estado_pago, notas)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
     """, (
         id_cliente, id_programacion, calculo['id_cupon'], calculo['tipo_cliente'],
-        modalidad, direccion if modalidad == 'domicilio' else None, telefono,
+        modalidad, direccion if modalidad == 'domicilio' else None,
+        latitud if modalidad == 'domicilio' else None,
+        longitud if modalidad == 'domicilio' else None, telefono,
         calculo['subtotal'], calculo['descuento'], calculo['costo_envio'],
         calculo['saldo_aplicado'], calculo['total'], metodo_pago, estado_pago, notas
     ))

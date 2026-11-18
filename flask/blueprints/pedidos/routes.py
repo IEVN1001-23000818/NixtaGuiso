@@ -9,6 +9,8 @@ from database import mysql
 from utils.seguridad import cliente_requerido
 from utils.precios import obtener_tipo_cliente
 from utils.pedidos import ErrorPedido, leer_productos, calcular_pedido, insertar_pedido
+from utils.validaciones import ErrorValidacion
+from utils.ubicacion import leer_ubicacion, a_numero
 
 pedidos_bp = Blueprint('pedidos', __name__)
 
@@ -141,6 +143,18 @@ def crear_pedido():
         cursor = mysql.connection.cursor()
         tipo, nivel = obtener_tipo_cliente(cursor)
 
+        # UBICACION DE ENTREGA: la marcada en el checkout o la guardada en el perfil
+        latitud, longitud = None, None
+        if modalidad == 'domicilio':
+            latitud, longitud = leer_ubicacion(datos)
+            if latitud is None:
+                cursor.execute(
+                    "SELECT latitud, longitud FROM clientes WHERE id_cliente = %s",
+                    (session['id_cliente'],)
+                )
+                guardada = cursor.fetchone()
+                latitud, longitud = guardada['latitud'], guardada['longitud']
+
         # CALCULO CON LAS FILAS APARTADAS (FOR UPDATE)
         calculo = calcular_pedido(
             cursor, session['id_cliente'], tipo, nivel, cantidades,
@@ -160,7 +174,8 @@ def crear_pedido():
         # GUARDAR PEDIDO, DETALLE, INVENTARIO, SALDO Y AVISO
         id_pedido = insertar_pedido(
             cursor, session['id_cliente'], session['id_usuario'], calculo,
-            modalidad, direccion, telefono, metodo_pago, estado_pago, notas or None
+            modalidad, direccion, telefono, metodo_pago, estado_pago, notas or None,
+            latitud=latitud, longitud=longitud
         )
 
         mysql.connection.commit()
@@ -174,7 +189,7 @@ def crear_pedido():
             'total': calculo['total']
         }), 201
 
-    except ErrorPedido as e:
+    except (ErrorPedido, ErrorValidacion) as e:
         mysql.connection.rollback()
         return jsonify({'exito': False, 'mensaje': e.mensaje}), e.codigo
 
@@ -296,6 +311,8 @@ def detalle_pedido(id_pedido):
                 'estado': pedido['estado'],
                 'modalidad': pedido['modalidad'],
                 'direccion_entrega': pedido['direccion_entrega'],
+                'latitud': a_numero(pedido['latitud']),
+                'longitud': a_numero(pedido['longitud']),
                 'telefono_contacto': pedido['telefono_contacto'],
                 'metodo_pago': pedido['metodo_pago'],
                 'estado_pago': pedido['estado_pago'],

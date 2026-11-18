@@ -42,6 +42,8 @@ CREATE TABLE clientes (
   rfc                    VARCHAR(13)  NULL,
   nivel_b2b              TINYINT NULL,
   direccion              VARCHAR(255) NULL,
+  latitud                DECIMAL(9,6) NULL,      -- ubicación marcada en el mapa
+  longitud               DECIMAL(9,6) NULL,
   codigo_referido        VARCHAR(20)  NOT NULL,
   id_referido_por        INT NULL,
   saldo_favor            DECIMAL(10,2) NOT NULL DEFAULT 0.00,
@@ -56,7 +58,8 @@ CREATE TABLE clientes (
     (tipo = 'B2C' AND nivel_b2b IS NULL) OR
     (tipo = 'B2B' AND nivel_b2b IN (1,2) AND nombre_negocio IS NOT NULL)
   ),
-  CONSTRAINT ck_clientes_saldo CHECK (saldo_favor >= 0)
+  CONSTRAINT ck_clientes_saldo CHECK (saldo_favor >= 0),
+  CONSTRAINT ck_clientes_ubicacion CHECK ((latitud IS NULL) = (longitud IS NULL))
 ) ENGINE=InnoDB;
 
 -- Las 5 líneas de producto
@@ -177,6 +180,9 @@ CREATE TABLE pedidos (
   estado            ENUM('pendiente','preparando','en_ruta','entregado','cancelado') NOT NULL DEFAULT 'pendiente',
   modalidad         ENUM('domicilio','recoger') NOT NULL,
   direccion_entrega VARCHAR(255) NULL,
+  latitud           DECIMAL(9,6) NULL,           -- ubicación de entrega (mapa de rutas)
+  longitud          DECIMAL(9,6) NULL,
+  orden_ruta        INT NULL,                    -- número de parada del repartidor
   telefono_contacto VARCHAR(15)  NOT NULL,
   subtotal          DECIMAL(10,2) NOT NULL,
   descuento         DECIMAL(10,2) NOT NULL DEFAULT 0.00,
@@ -193,6 +199,8 @@ CREATE TABLE pedidos (
   CONSTRAINT fk_pedidos_repartidor   FOREIGN KEY (id_repartidor)   REFERENCES repartidores(id_repartidor),
   CONSTRAINT ck_pedidos_montos CHECK (subtotal >= 0 AND descuento >= 0 AND costo_envio >= 0 AND saldo_aplicado >= 0 AND total >= 0),
   CONSTRAINT ck_pedidos_direccion CHECK (modalidad = 'recoger' OR direccion_entrega IS NOT NULL),
+  CONSTRAINT ck_pedidos_ubicacion CHECK ((latitud IS NULL) = (longitud IS NULL)),
+  CONSTRAINT ck_pedidos_orden CHECK (orden_ruta IS NULL OR orden_ruta > 0),
   INDEX idx_pedidos_fecha (fecha_pedido),
   INDEX idx_pedidos_estado (estado)
 ) ENGINE=InnoDB;
@@ -350,9 +358,10 @@ INSERT INTO usuarios (id_usuario, nombre, correo, telefono, contrasena_hash, rol
 (3, 'Tomás Hernández', 'tacoseltomy@ejemplo.com', '4771234567',
  'pbkdf2:sha256:1000000$3veEoGNvlAaXjoFT$b5152c6ea55ecfad30b230ccd7ee06c8e6494212508fec3f358f80d16115d008', 'cliente');
 
-INSERT INTO clientes (id_cliente, id_usuario, tipo, nombre_negocio, rfc, nivel_b2b, direccion, codigo_referido) VALUES
-(1, 2, 'B2C', NULL, NULL, NULL, 'Colina Santa Julia #205, León, Gto.', 'JUDITH20'),
-(2, 3, 'B2B', 'Tacos el Tomy', 'XAXX010101000', 1, 'Bosques de Santa Rita #107, León, Gto.', 'TOMY20');
+-- Las coordenadas son ubicaciones de prueba dentro de León, para ver el mapa de rutas
+INSERT INTO clientes (id_cliente, id_usuario, tipo, nombre_negocio, rfc, nivel_b2b, direccion, latitud, longitud, codigo_referido) VALUES
+(1, 2, 'B2C', NULL, NULL, NULL, 'Colina Santa Julia #205, León, Gto.', 21.134000, -101.674500, 'JUDITH20'),
+(2, 3, 'B2B', 'Tacos el Tomy', 'XAXX010101000', 1, 'Bosques de Santa Rita #107, León, Gto.', 21.110500, -101.658000, 'TOMY20');
 
 INSERT INTO categorias (id_categoria, nombre, descripcion, orden) VALUES
 (1, 'Derivados de maíz', 'Tortillas, sopes y gorditas de maíz nixtamalizado', 1),

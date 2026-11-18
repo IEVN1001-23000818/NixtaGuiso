@@ -7,6 +7,8 @@ from werkzeug.security import generate_password_hash, check_password_hash
 
 from database import mysql
 from utils.seguridad import login_requerido
+from utils.validaciones import ErrorValidacion
+from utils.ubicacion import leer_ubicacion, a_numero
 
 auth_bp = Blueprint('auth', __name__)
 
@@ -24,7 +26,7 @@ def obtener_usuario(cursor, id_usuario):
     cursor.execute("""
         SELECT u.id_usuario, u.nombre, u.correo, u.telefono, u.rol,
                c.id_cliente, c.tipo, c.nombre_negocio, c.rfc, c.nivel_b2b,
-               c.direccion, c.codigo_referido, c.saldo_favor
+               c.direccion, c.latitud, c.longitud, c.codigo_referido, c.saldo_favor
         FROM usuarios u
         LEFT JOIN clientes c ON c.id_usuario = u.id_usuario
         WHERE u.id_usuario = %s AND u.activo = TRUE
@@ -51,6 +53,8 @@ def obtener_usuario(cursor, id_usuario):
             'rfc': fila['rfc'],
             'nivel_b2b': fila['nivel_b2b'],
             'direccion': fila['direccion'],
+            'latitud': a_numero(fila['latitud']),
+            'longitud': a_numero(fila['longitud']),
             'codigo_referido': fila['codigo_referido'],
             'saldo_favor': float(fila['saldo_favor'])
         }
@@ -103,6 +107,7 @@ def registro():
         rfc = str(datos.get('rfc', '') or '').strip().upper()
         direccion = str(datos.get('direccion', '') or '').strip()
         codigo_invitacion = str(datos.get('codigo_invitacion', '') or '').strip().upper()
+        latitud, longitud = leer_ubicacion(datos)
 
         # VALIDACIONES
         if len(nombre) < 3:
@@ -165,8 +170,8 @@ def registro():
         cursor.execute("""
             INSERT INTO clientes
             (id_usuario, tipo, nombre_negocio, rfc, nivel_b2b, direccion,
-             codigo_referido, id_referido_por)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+             latitud, longitud, codigo_referido, id_referido_por)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         """, (
             id_usuario,
             tipo,
@@ -174,6 +179,8 @@ def registro():
             rfc or None,
             1 if tipo == 'B2B' else None,
             direccion or None,
+            latitud,
+            longitud,
             generar_codigo_referido(cursor, nombre),
             id_referido_por
         ))
@@ -189,6 +196,9 @@ def registro():
             'mensaje': 'Cuenta creada correctamente',
             'usuario': usuario
         }), 201
+
+    except ErrorValidacion as e:
+        return jsonify({'exito': False, 'mensaje': e.mensaje}), e.codigo
 
     except Exception as e:
         print("ERROR EN REGISTRO:", str(e))

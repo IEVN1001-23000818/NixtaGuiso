@@ -8,6 +8,7 @@ from database import mysql
 from utils.seguridad import admin_requerido
 from utils.validaciones import ErrorValidacion, texto, booleano
 from utils.precios import tipo_de_cliente
+from utils.ubicacion import leer_ubicacion, a_numero
 from utils.pedidos import (calcular_pedido, insertar_pedido, reponer_inventario,
                            notificar, otorgar_bono_referido, ErrorPedido)
 
@@ -323,6 +324,9 @@ def detalle_pedido_admin(id_pedido):
                 'siguientes_estados': list(SIGUIENTES[p['estado']]),
                 'modalidad': p['modalidad'],
                 'direccion_entrega': p['direccion_entrega'],
+                'latitud': a_numero(p['latitud']),
+                'longitud': a_numero(p['longitud']),
+                'orden_ruta': p['orden_ruta'],
                 'telefono_contacto': p['telefono_contacto'],
                 'metodo_pago': p['metodo_pago'],
                 'estado_pago': p['estado_pago'],
@@ -567,14 +571,27 @@ def asignar_repartidor(id_pedido):
         if not repartidor:
             raise ErrorValidacion('El repartidor no existe o está inactivo', 404)
 
+        # El pedido se agrega como la última parada de la ruta del repartidor ese día
+        if p['id_repartidor'] == id_repartidor and p['orden_ruta']:
+            orden = p['orden_ruta']
+        else:
+            cursor.execute("""
+                SELECT COALESCE(MAX(orden_ruta), 0) + 1 AS siguiente FROM pedidos
+                WHERE id_repartidor = %s AND DATE(fecha_pedido) = DATE(%s)
+                  AND estado <> 'cancelado'
+            """, (id_repartidor, p['fecha_pedido']))
+            orden = cursor.fetchone()['siguiente']
+
         cursor.execute(
-            "UPDATE pedidos SET id_repartidor = %s WHERE id_pedido = %s", (id_repartidor, id_pedido)
+            "UPDATE pedidos SET id_repartidor = %s, orden_ruta = %s WHERE id_pedido = %s",
+            (id_repartidor, orden, id_pedido)
         )
         mysql.connection.commit()
 
         return jsonify({
             'exito': True,
-            'mensaje': f"Pedido #{id_pedido} asignado a {repartidor['nombre']}"
+            'mensaje': f"Pedido #{id_pedido} asignado a {repartidor['nombre']} (parada {orden})",
+            'orden_ruta': orden
         }), 200
 
     except ErrorValidacion as e:
@@ -619,7 +636,8 @@ def generar_pedidos_programados():
         cursor = mysql.connection.cursor()
 
         cursor.execute("""
-            SELECT pg.*, c.id_usuario, u.telefono, u.nombre AS cliente, c.nombre_negocio
+            SELECT pg.*, c.id_usuario, u.telefono, u.nombre AS cliente, c.nombre_negocio,
+                   c.latitud, c.longitud
             FROM programaciones pg
             JOIN clientes c ON c.id_cliente = pg.id_cliente
             JOIN usuarios u ON u.id_usuario = c.id_usuario
@@ -676,7 +694,8 @@ def generar_pedidos_programados():
             id_pedido = insertar_pedido(
                 cursor, prog['id_cliente'], prog['id_usuario'], calculo, 'domicilio',
                 prog['direccion_entrega'], prog['telefono'], 'transferencia', 'por_validar',
-                notas, prog['id_programacion']
+                notas, prog['id_programacion'],
+                latitud=prog['latitud'], longitud=prog['longitud']
             )
 
             if prog['frecuencia'] == 'unica':
@@ -702,6 +721,215 @@ def generar_pedidos_programados():
         print("ERROR AL GENERAR PEDIDOS PROGRAMADOS:", str(e))
         mysql.connection.rollback()
         return jsonify({'exito': False, 'mensaje': 'No se pudieron generar los pedidos'}), 500
+
+    finally:
+        if cursor:
+            cursor.close()
+
+
+
+# =====================================================================
+#  MAPA DE RUTAS
+# =====================================================================
+
+def armar_parada(f):
+    return {
+        'id_pedido': f['id_pedido'],
+        'orden_ruta': f['orden_ruta'],
+        'cliente': f['nombre_negocio'] or f['cliente'],
+        'tipo_cliente': f['tipo_cliente'],
+        'direccion_entrega': f['direccion_entrega'],
+        'telefono_contacto': f['telefono_contacto'],
+        'latitud': a_numero(f['latitud']),
+        'longitud': a_numero(f['longitud']),
+        'estado': f['estado'],
+        'total': float(f['total']),
+        'notas': f['notas']
+    }
+
+
+# ---------------------------------------------------------------------
+#  RUTAS DE UN DIA, POR REPARTIDOR
+#  /api/admin/rutas?fecha=2026-11-19   (por defecto, hoy)
+#  Sirve para planear el día y para consultar rutas guardadas.
+# ---------------------------------------------------------------------
+
+@admin_despacho_bp.route('/api/admin/rutas', methods=['GET'])
+@admin_requerido
+def rutas_del_dia():
+    cursor = None
+
+    try:
+        texto_fecha = request.args.get('fecha', '')
+        try:
+            fecha = datetime.strptime(texto_fecha, '%Y-%m-%d').date() if texto_fecha else date.today()
+        except ValueError:
+            return jsonify({'exito': False, 'mensaje': 'La fecha debe tener el formato AAAA-MM-DD'}), 400
+
+        cursor = mysql.connection.cursor()
+        cursor.execute("""
+            SELECT p.id_pedido, p.id_repartidor, p.orden_ruta, p.tipo_cliente,
+                   p.direccion_entrega, p.telefono_contacto, p.latitud, p.longitud,
+                   p.estado, p.total, p.notas,
+                   u.nombre AS cliente, c.nombre_negocio,
+                   r.nombre AS repartidor, r.telefono AS telefono_repartidor, r.placas
+            FROM pedidos p
+            JOIN clientes c ON c.id_cliente = p.id_cliente
+            JOIN usuarios u ON u.id_usuario = c.id_usuario
+            LEFT JOIN repartidores r ON r.id_repartidor = p.id_repartidor
+            WHERE DATE(p.fecha_pedido) = %s
+              AND p.modalidad = 'domicilio' AND p.estado <> 'cancelado'
+            ORDER BY p.id_repartidor, p.orden_ruta, p.id_pedido
+        """, (fecha,))
+
+        rutas = {}
+        sin_asignar = []
+        sin_ubicacion = 0
+
+        for f in cursor.fetchall():
+            parada = armar_parada(f)
+            if parada['latitud'] is None:
+                sin_ubicacion += 1
+
+            if f['id_repartidor'] is None:
+                sin_asignar.append(parada)
+                continue
+
+            if f['id_repartidor'] not in rutas:
+                rutas[f['id_repartidor']] = {
+                    'id_repartidor': f['id_repartidor'],
+                    'repartidor': f['repartidor'],
+                    'telefono': f['telefono_repartidor'],
+                    'placas': f['placas'],
+                    'paradas': []
+                }
+            rutas[f['id_repartidor']]['paradas'].append(parada)
+
+        for ruta in rutas.values():
+            ruta['total_paradas'] = len(ruta['paradas'])
+            ruta['entregadas'] = sum(1 for x in ruta['paradas'] if x['estado'] == 'entregado')
+
+        return jsonify({
+            'exito': True,
+            'fecha': fecha.isoformat(),
+            'rutas': list(rutas.values()),
+            'sin_asignar': sin_asignar,
+            'pedidos_sin_ubicacion': sin_ubicacion
+        }), 200
+
+    except Exception as e:
+        print("ERROR AL CONSULTAR RUTAS:", str(e))
+        return jsonify({'exito': False, 'mensaje': 'No se pudieron obtener las rutas'}), 500
+
+    finally:
+        if cursor:
+            cursor.close()
+
+
+# ---------------------------------------------------------------------
+#  GUARDAR EL ORDEN DE LAS PARADAS
+#  { "id_repartidor": 1, "pedidos": [5, 3, 8] }   -> 5 es la parada 1
+# ---------------------------------------------------------------------
+
+@admin_despacho_bp.route('/api/admin/rutas/orden', methods=['PUT'])
+@admin_requerido
+def guardar_orden_ruta():
+    cursor = None
+
+    try:
+        datos = request.get_json(silent=True) or {}
+        pedidos = datos.get('pedidos')
+
+        try:
+            id_repartidor = int(datos.get('id_repartidor'))
+        except (TypeError, ValueError):
+            raise ErrorValidacion('Indica el repartidor')
+
+        if not isinstance(pedidos, list) or not pedidos or \
+                not all(isinstance(x, int) for x in pedidos):
+            raise ErrorValidacion('Indica la lista de pedidos en el orden de la ruta')
+
+        if len(set(pedidos)) != len(pedidos):
+            raise ErrorValidacion('Hay pedidos repetidos en la ruta')
+
+        cursor = mysql.connection.cursor()
+        marcadores = ', '.join(['%s'] * len(pedidos))
+        cursor.execute(f"""
+            SELECT id_pedido FROM pedidos
+            WHERE id_pedido IN ({marcadores}) AND id_repartidor = %s
+              AND modalidad = 'domicilio' AND estado <> 'cancelado'
+        """, (*pedidos, id_repartidor))
+        encontrados = {f['id_pedido'] for f in cursor.fetchall()}
+
+        ajenos = [x for x in pedidos if x not in encontrados]
+        if ajenos:
+            raise ErrorValidacion(
+                f"Estos pedidos no están asignados a ese repartidor: {', '.join(map(str, ajenos))}"
+            )
+
+        for posicion, id_pedido in enumerate(pedidos, start=1):
+            cursor.execute(
+                "UPDATE pedidos SET orden_ruta = %s WHERE id_pedido = %s", (posicion, id_pedido)
+            )
+
+        mysql.connection.commit()
+
+        return jsonify({
+            'exito': True,
+            'mensaje': f"Ruta guardada con {len(pedidos)} paradas"
+        }), 200
+
+    except ErrorValidacion as e:
+        mysql.connection.rollback()
+        return jsonify({'exito': False, 'mensaje': e.mensaje}), e.codigo
+
+    except Exception as e:
+        print("ERROR AL GUARDAR RUTA:", str(e))
+        mysql.connection.rollback()
+        return jsonify({'exito': False, 'mensaje': 'No se pudo guardar la ruta'}), 500
+
+    finally:
+        if cursor:
+            cursor.close()
+
+
+# ---------------------------------------------------------------------
+#  CORREGIR LA UBICACION DE UN PEDIDO  { "latitud": ..., "longitud": ... }
+# ---------------------------------------------------------------------
+
+@admin_despacho_bp.route('/api/admin/pedidos/<int:id_pedido>/ubicacion', methods=['PUT'])
+@admin_requerido
+def corregir_ubicacion(id_pedido):
+    cursor = None
+
+    try:
+        latitud, longitud = leer_ubicacion(request.get_json(silent=True) or {}, obligatorio=True)
+
+        cursor = mysql.connection.cursor()
+        p = obtener_pedido(cursor, id_pedido, bloquear=True)
+
+        if not p:
+            raise ErrorValidacion('El pedido no existe', 404)
+
+        if p['modalidad'] != 'domicilio':
+            raise ErrorValidacion('Los pedidos para recoger no llevan ubicación de entrega')
+
+        cursor.execute(
+            "UPDATE pedidos SET latitud = %s, longitud = %s WHERE id_pedido = %s",
+            (latitud, longitud, id_pedido)
+        )
+        mysql.connection.commit()
+
+        return jsonify({'exito': True, 'mensaje': 'Ubicación actualizada'}), 200
+
+    except ErrorValidacion as e:
+        mysql.connection.rollback()
+        return jsonify({'exito': False, 'mensaje': e.mensaje}), e.codigo
+
+    except Exception as e:
+        print("ERROR AL CORREGIR UBICACION:", str(e))
+        mysql.connection.rollback()
+        return jsonify({'exito': False, 'mensaje': 'No se pudo actualizar la ubicación'}), 500
 
     finally:
         if cursor:

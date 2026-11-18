@@ -3,6 +3,8 @@ from flask import Blueprint, request, jsonify, session
 from database import mysql
 from utils.seguridad import cliente_requerido, login_requerido
 from utils.precios import obtener_tipo_cliente, nombre_tarifa
+from utils.validaciones import ErrorValidacion
+from utils.ubicacion import leer_ubicacion
 from blueprints.catalogo.routes import CONSULTA_PRODUCTOS, armar_producto
 from blueprints.auth.routes import obtener_usuario, PATRON_CORREO, PATRON_TELEFONO, PATRON_RFC
 
@@ -129,6 +131,14 @@ def editar_perfil():
             WHERE id_cliente = %s
         """, (direccion or None, nombre_negocio or None, rfc or None, session['id_cliente']))
 
+        # Ubicación en el mapa (solo si se envió)
+        if 'latitud' in datos or 'longitud' in datos:
+            latitud, longitud = leer_ubicacion(datos)
+            cursor.execute(
+                "UPDATE clientes SET latitud = %s, longitud = %s WHERE id_cliente = %s",
+                (latitud, longitud, session['id_cliente'])
+            )
+
         mysql.connection.commit()
 
         return jsonify({
@@ -136,6 +146,10 @@ def editar_perfil():
             'mensaje': 'Perfil actualizado',
             'usuario': obtener_usuario(cursor, session['id_usuario'])
         }), 200
+
+    except ErrorValidacion as e:
+        mysql.connection.rollback()
+        return jsonify({'exito': False, 'mensaje': e.mensaje}), e.codigo
 
     except Exception as e:
         print("ERROR AL EDITAR PERFIL:", str(e))
