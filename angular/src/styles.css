@@ -1,0 +1,36 @@
+@import "tailwindcss";
+
+/* =====================================================================
+   NixtaGuiso · Colores y tipografía de la marca
+   Se usan como cualquier color de Tailwind:
+   bg-nixta-naranja, text-nixta-cafe, border-nixta-verde, etc.
+   ===================================================================== */
+@theme {
+  --color-nixta-naranja: #F5AF41;   /* encabezados y barra de navegación */
+  --color-nixta-crema: #EFEDD2;     /* fondo de las pantallas */
+  --color-nixta-verde: #10733B;     /* botones principales */
+  --color-nixta-cafe: #593936;      /* títulos y texto */
+  --color-nixta-dorado: #C08E46;    /* botones secundarios y detalles */
+  --color-nixta-amarillo: #F8E330;  /* alertas y avisos */
+
+  --font-sans: "Poppins", ui-sans-serif, system-ui, sans-serif;
+}
+
+/* Estilos generales */
+html, body {
+  min-height: 100%;
+}
+
+html {
+  @apply bg-nixta-crema;
+}
+
+body {
+  @apply bg-nixta-crema text-nixta-cafe font-sans antialiased;
+}
+
+/* Íconos de Google (Material Symbols) */
+.material-symbols-rounded {
+  font-variation-settings: 'FILL' 1, 'wght' 500, 'GRAD' 0, 'opsz' 24;
+  user-select: none;
+}
