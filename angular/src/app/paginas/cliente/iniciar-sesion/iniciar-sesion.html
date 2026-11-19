@@ -1,0 +1,67 @@
+<main class="min-h-screen lg:grid lg:grid-cols-2">
+
+  <!-- Panel naranja: arriba en celular, a la izquierda en computadora -->
+  <section class="bg-nixta-naranja px-6 pt-6 pb-16 lg:pb-6 lg:flex lg:flex-col lg:justify-center lg:items-center">
+    <a routerLink="/" aria-label="Regresar"
+       class="lg:hidden w-9 h-9 grid place-items-center rounded-full bg-white/90 text-nixta-cafe shadow-sm">
+      <span class="material-symbols-rounded text-xl">arrow_back</span>
+    </a>
+    <div class="mt-4 lg:mt-0 lg:text-center">
+      <img src="logos/logo-letras.png" alt="NixtaGuiso" class="hidden lg:block mx-auto h-32 w-auto mb-8">
+      <h1 class="text-3xl font-extrabold text-nixta-cafe">Iniciar sesión</h1>
+      <p class="mt-1 text-sm font-medium text-nixta-cafe/80">Entra con tu cuenta de NixtaGuiso</p>
+    </div>
+  </section>
+
+  <!-- Formulario -->
+  <section class="-mt-10 lg:mt-0 rounded-t-3xl lg:rounded-none bg-nixta-crema px-6 pt-8 pb-10 lg:flex lg:items-center lg:justify-center">
+    <form [formGroup]="formulario" (ngSubmit)="iniciarSesion()" class="w-full max-w-sm mx-auto space-y-4" novalidate>
+
+      <label class="block">
+        <span class="text-sm font-semibold">Correo</span>
+        <input type="email" formControlName="correo" autocomplete="email" placeholder="ejemplo@gmail.com"
+               class="mt-1 w-full rounded-2xl bg-white px-4 py-3 outline-none border-2 transition"
+               [class.border-red-400]="invalido('correo')" [class.border-transparent]="!invalido('correo')">
+        @if (invalido('correo')) {
+          <span class="text-xs text-red-600">Escribe un correo válido</span>
+        }
+      </label>
+
+      <label class="block">
+        <span class="text-sm font-semibold">Contraseña</span>
+        <div class="relative mt-1">
+          <input [type]="verContrasena() ? 'text' : 'password'" formControlName="contrasena"
+                 autocomplete="current-password" placeholder="••••••••"
+                 class="w-full rounded-2xl bg-white px-4 py-3 pr-12 outline-none border-2 transition"
+                 [class.border-red-400]="invalido('contrasena')" [class.border-transparent]="!invalido('contrasena')">
+          <button type="button" (click)="verContrasena.set(!verContrasena())"
+                  [attr.aria-label]="verContrasena() ? 'Ocultar contraseña' : 'Mostrar contraseña'"
+                  class="absolute right-3 top-1/2 -translate-y-1/2 text-nixta-cafe/60">
+            <span class="material-symbols-rounded">{{ verContrasena() ? 'visibility_off' : 'visibility' }}</span>
+          </button>
+        </div>
+        @if (invalido('contrasena')) {
+          <span class="text-xs text-red-600">Escribe tu contraseña</span>
+        }
+      </label>
+
+      @if (error()) {
+        <div class="rounded-2xl bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700">{{ error() }}</div>
+      }
+
+      <button type="submit" [disabled]="enviando()"
+              class="w-full rounded-full bg-nixta-verde text-white font-semibold py-3 shadow-sm
+                     hover:brightness-110 active:scale-[0.98] transition disabled:opacity-60">
+        {{ enviando() ? 'Entrando…' : 'Iniciar' }}
+      </button>
+
+      <p class="text-center text-sm">
+        ¿No tienes una cuenta?
+        <a routerLink="/registro" class="font-semibold text-nixta-verde underline underline-offset-4">Regístrate</a>
+      </p>
+      <p class="text-center">
+        <a routerLink="/" class="text-xs font-semibold underline underline-offset-4 opacity-70">Ver el catálogo</a>
+      </p>
+    </form>
+  </section>
+</main>

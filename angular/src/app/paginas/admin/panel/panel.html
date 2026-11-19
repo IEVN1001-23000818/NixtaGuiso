@@ -1,0 +1,11 @@
+<main class="min-h-screen grid place-items-center px-6">
+  <div class="max-w-md w-full rounded-3xl bg-white p-8 shadow-md text-center">
+    <img src="logos/logo-letras.png" alt="NixtaGuiso" class="mx-auto h-16 w-auto">
+    <h1 class="mt-4 text-2xl font-extrabold">Panel administrativo</h1>
+    <p class="mt-2 text-sm opacity-80">Hola, {{ auth.primerNombre() }}. El Panel Operativo se construye en el paso 7.</p>
+    <button (click)="cerrarSesion()"
+            class="mt-6 w-full rounded-full bg-nixta-cafe text-white font-semibold py-3 hover:brightness-110 transition">
+      Cerrar sesión
+    </button>
+  </div>
+</main>

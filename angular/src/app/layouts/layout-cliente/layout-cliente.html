@@ -1,0 +1,66 @@
+<div class="min-h-screen flex flex-col">
+
+  <!-- ===== Barra superior: solo en computadora ===== -->
+  <header class="hidden lg:block sticky top-0 z-30 bg-nixta-crema/95 backdrop-blur border-b border-nixta-cafe/10">
+    <div class="max-w-6xl mx-auto px-6 h-20 flex items-center justify-between gap-6">
+
+      <a routerLink="/" class="shrink-0">
+        <img src="logos/logo-letras.png" alt="NixtaGuiso" class="h-12 w-auto">
+      </a>
+
+      <nav class="flex items-center gap-1">
+        @for (opcion of menu; track opcion.ruta) {
+          <a [routerLink]="opcion.ruta"
+             routerLinkActive="bg-nixta-naranja"
+             [routerLinkActiveOptions]="{ exact: opcion.exacta }"
+             class="flex items-center gap-2 px-4 py-2 rounded-full font-semibold text-sm hover:bg-nixta-naranja/40 transition">
+            <span class="material-symbols-rounded text-xl">{{ opcion.icono }}</span>
+            {{ opcion.texto }}
+          </a>
+        }
+      </nav>
+
+      <div class="flex items-center gap-3">
+        @if (auth.esCliente()) {
+          <span class="text-sm">Hola, <strong>{{ auth.primerNombre() }}</strong></span>
+          <button (click)="cerrarSesion()"
+                  class="px-4 py-2 rounded-full border-2 border-nixta-cafe text-sm font-semibold hover:bg-nixta-cafe hover:text-white transition">
+            Cerrar sesión
+          </button>
+        } @else {
+          <a routerLink="/login"
+             class="px-4 py-2 rounded-full border-2 border-nixta-cafe text-sm font-semibold hover:bg-nixta-cafe hover:text-white transition">
+            Iniciar sesión
+          </a>
+          <a routerLink="/registro"
+             class="px-5 py-2.5 rounded-full bg-nixta-verde text-white text-sm font-semibold hover:brightness-110 transition">
+            Registrarme
+          </a>
+        }
+      </div>
+    </div>
+  </header>
+
+  <!-- ===== Contenido de cada pantalla ===== -->
+  <main class="flex-1 w-full max-w-6xl mx-auto pb-28 lg:pb-12 lg:px-6">
+    <router-outlet />
+  </main>
+
+  <!-- ===== Barra inferior naranja: solo en celular (maquetados) ===== -->
+  <nav class="lg:hidden fixed bottom-0 inset-x-0 z-30 bg-nixta-naranja rounded-t-3xl shadow-[0_-4px_16px_rgba(0,0,0,0.08)]">
+    <ul class="flex justify-around items-center h-18 px-2">
+      @for (opcion of menu; track opcion.ruta) {
+        <li>
+          <a [routerLink]="opcion.ruta"
+             routerLinkActive="bg-white text-nixta-verde"
+             [routerLinkActiveOptions]="{ exact: opcion.exacta }"
+             [attr.aria-label]="opcion.texto"
+             class="flex flex-col items-center justify-center w-16 h-14 rounded-2xl text-nixta-cafe transition">
+            <span class="material-symbols-rounded text-2xl">{{ opcion.icono }}</span>
+            <span class="text-[11px] font-semibold">{{ opcion.texto }}</span>
+          </a>
+        </li>
+      }
+    </ul>
+  </nav>
+</div>

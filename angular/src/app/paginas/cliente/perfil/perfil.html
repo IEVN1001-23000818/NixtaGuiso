@@ -1,0 +1,36 @@
+<app-encabezado-pagina titulo="Mi perfil" />
+
+@if (auth.usuario(); as u) {
+  <section class="px-5 pt-6 grid gap-5 lg:grid-cols-2">
+
+    <article class="rounded-3xl bg-nixta-naranja p-6 shadow-md text-center">
+      <div class="mx-auto w-20 h-20 rounded-full bg-nixta-crema grid place-items-center text-3xl font-extrabold">
+        {{ u.nombre.charAt(0) }}
+      </div>
+      <span class="mt-3 inline-block rounded-full bg-nixta-verde text-white text-xs font-semibold px-3 py-1">
+        {{ insignia() }}
+      </span>
+
+      <dl class="mt-4 space-y-3 text-sm">
+        @if (cliente()?.nombre_negocio) {
+          <div><dt class="font-bold">Negocio</dt><dd>{{ cliente()?.nombre_negocio }}</dd></div>
+        }
+        <div><dt class="font-bold">Nombre</dt><dd>{{ u.nombre }}</dd></div>
+        <div><dt class="font-bold">Correo</dt><dd>{{ u.correo }}</dd></div>
+        <div><dt class="font-bold">Teléfono</dt><dd>{{ u.telefono }}</dd></div>
+      </dl>
+    </article>
+
+    <article class="rounded-3xl bg-white p-6 shadow-md">
+      <h2 class="font-bold text-lg">Invita y gana</h2>
+      <p class="text-sm opacity-80 mt-1">Comparte tu código: cuando tu invitado reciba su primer pedido, ambos ganan $20.</p>
+      <p class="mt-4 text-center text-2xl font-extrabold tracking-widest text-nixta-verde">{{ cliente()?.codigo_referido }}</p>
+      <p class="mt-4 text-sm">Saldo a favor: <strong>{{ '$' + (cliente()?.saldo_favor ?? 0).toFixed(2) }}</strong></p>
+
+      <button (click)="cerrarSesion()"
+              class="mt-6 w-full rounded-full bg-nixta-cafe text-white font-semibold py-3 hover:brightness-110 transition">
+        Cerrar sesión
+      </button>
+    </article>
+  </section>
+}

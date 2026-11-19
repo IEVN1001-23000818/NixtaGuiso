@@ -1,0 +1,30 @@
+<main class="min-h-screen bg-nixta-naranja flex flex-col items-center justify-between px-6 py-10">
+
+  <div class="flex-1 flex flex-col items-center justify-center text-center">
+    <!-- El isotipo va sobre un círculo crema para que el sol naranja se distinga -->
+    <div class="w-52 h-52 md:w-64 md:h-64 rounded-full bg-nixta-crema grid place-items-center shadow-lg">
+      <img src="logos/isotipo.png" alt="" class="w-40 md:w-48 h-auto">
+    </div>
+    <img src="logos/logo-letras.png" alt="NixtaGuiso" class="mt-6 h-24 md:h-28 w-auto">
+    <p class="mt-4 max-w-xs font-semibold text-nixta-cafe">
+      Tortilla de nixtamal y comida tradicional, caliente y a tiempo en León.
+    </p>
+  </div>
+
+  <div class="w-full max-w-sm space-y-3">
+    <div class="grid grid-cols-2 gap-3">
+      <button (click)="ir('/registro')"
+              class="rounded-full bg-nixta-crema text-nixta-cafe font-semibold py-3 shadow-sm hover:bg-white transition">
+        Registrarme
+      </button>
+      <button (click)="ir('/login')"
+              class="rounded-full bg-nixta-cafe text-white font-semibold py-3 shadow-sm hover:brightness-110 transition">
+        Iniciar
+      </button>
+    </div>
+    <button (click)="ir('/')"
+            class="w-full text-sm font-semibold text-nixta-cafe underline underline-offset-4 py-2">
+      Ver el catálogo sin registrarme
+    </button>
+  </div>
+</main>

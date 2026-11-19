@@ -1,0 +1,157 @@
+<main class="min-h-screen lg:grid lg:grid-cols-2">
+
+  <section class="bg-nixta-naranja px-6 pt-6 pb-16 lg:pb-6 lg:flex lg:flex-col lg:justify-center lg:items-center lg:sticky lg:top-0 lg:h-screen">
+    <a routerLink="/" aria-label="Regresar"
+       class="lg:hidden w-9 h-9 grid place-items-center rounded-full bg-white/90 text-nixta-cafe shadow-sm">
+      <span class="material-symbols-rounded text-xl">arrow_back</span>
+    </a>
+    <div class="mt-4 lg:mt-0 lg:text-center">
+      <img src="logos/logo-letras.png" alt="NixtaGuiso" class="hidden lg:block mx-auto h-32 w-auto mb-8">
+      <h1 class="text-3xl font-extrabold text-nixta-cafe">Registrarme</h1>
+      <p class="mt-1 text-sm font-medium text-nixta-cafe/80">Crea tu cuenta y pide en segundos</p>
+    </div>
+  </section>
+
+  <section class="-mt-10 lg:mt-0 rounded-t-3xl lg:rounded-none bg-nixta-crema px-6 pt-8 pb-10">
+    <form [formGroup]="formulario" (ngSubmit)="registrar()" class="w-full max-w-md mx-auto space-y-4" novalidate>
+
+      <!-- Tipo de cuenta -->
+      <fieldset>
+        <legend class="text-sm font-semibold mb-2">¿Cómo quieres comprar?</legend>
+        <div class="grid grid-cols-2 gap-3">
+          <label class="cursor-pointer">
+            <input type="radio" formControlName="tipo" value="B2C" class="peer sr-only">
+            <div class="rounded-2xl border-2 border-transparent bg-white p-3 text-center transition
+                        peer-checked:border-nixta-verde peer-checked:bg-nixta-verde/10">
+              <span class="material-symbols-rounded text-3xl text-nixta-dorado">home</span>
+              <p class="font-semibold">Hogar</p>
+              <p class="text-xs opacity-70">Para mi casa</p>
+            </div>
+          </label>
+          <label class="cursor-pointer">
+            <input type="radio" formControlName="tipo" value="B2B" class="peer sr-only">
+            <div class="rounded-2xl border-2 border-transparent bg-white p-3 text-center transition
+                        peer-checked:border-nixta-verde peer-checked:bg-nixta-verde/10">
+              <span class="material-symbols-rounded text-3xl text-nixta-verde">storefront</span>
+              <p class="font-semibold">Negocio</p>
+              <p class="text-xs opacity-70">Precio de mayoreo</p>
+            </div>
+          </label>
+        </div>
+      </fieldset>
+
+      <!-- Datos del negocio (solo B2B) -->
+      @if (esNegocio) {
+        <div class="grid gap-4 rounded-2xl bg-nixta-verde/5 border border-nixta-verde/20 p-4">
+          <label class="block">
+            <span class="text-sm font-semibold">Nombre del negocio</span>
+            <input type="text" formControlName="nombre_negocio" placeholder="Taquería La Guadalupana"
+                   class="mt-1 w-full rounded-2xl bg-white px-4 py-3 outline-none border-2 transition"
+                   [class.border-red-400]="invalido('nombre_negocio')" [class.border-transparent]="!invalido('nombre_negocio')">
+            @if (invalido('nombre_negocio')) {
+              <span class="text-xs text-red-600">Escribe el nombre del negocio</span>
+            }
+          </label>
+          <label class="block">
+            <span class="text-sm font-semibold">RFC <span class="font-normal opacity-60">(opcional)</span></span>
+            <input type="text" formControlName="rfc" placeholder="XAXX010101000" maxlength="13"
+                   class="mt-1 w-full rounded-2xl bg-white px-4 py-3 uppercase outline-none border-2 transition"
+                   [class.border-red-400]="invalido('rfc')" [class.border-transparent]="!invalido('rfc')">
+            @if (invalido('rfc')) {
+              <span class="text-xs text-red-600">El RFC no tiene un formato válido</span>
+            }
+          </label>
+        </div>
+      }
+
+      <label class="block">
+        <span class="text-sm font-semibold">Nombre completo</span>
+        <input type="text" formControlName="nombre" autocomplete="name" placeholder="Judith Rodríguez"
+               class="mt-1 w-full rounded-2xl bg-white px-4 py-3 outline-none border-2 transition"
+               [class.border-red-400]="invalido('nombre')" [class.border-transparent]="!invalido('nombre')">
+        @if (invalido('nombre')) {
+          <span class="text-xs text-red-600">Escribe al menos 3 caracteres</span>
+        }
+      </label>
+
+      <div class="grid gap-4 sm:grid-cols-2">
+        <label class="block">
+          <span class="text-sm font-semibold">Correo</span>
+          <input type="email" formControlName="correo" autocomplete="email" placeholder="ejemplo@gmail.com"
+                 class="mt-1 w-full rounded-2xl bg-white px-4 py-3 outline-none border-2 transition"
+                 [class.border-red-400]="invalido('correo')" [class.border-transparent]="!invalido('correo')">
+          @if (invalido('correo')) {
+            <span class="text-xs text-red-600">Escribe un correo válido</span>
+          }
+        </label>
+        <label class="block">
+          <span class="text-sm font-semibold">Teléfono</span>
+          <input type="tel" formControlName="telefono" autocomplete="tel" placeholder="4771234567" maxlength="10"
+                 class="mt-1 w-full rounded-2xl bg-white px-4 py-3 outline-none border-2 transition"
+                 [class.border-red-400]="invalido('telefono')" [class.border-transparent]="!invalido('telefono')">
+          @if (invalido('telefono')) {
+            <span class="text-xs text-red-600">Deben ser 10 dígitos</span>
+          }
+        </label>
+      </div>
+
+      <div class="grid gap-4 sm:grid-cols-2">
+        <label class="block">
+          <span class="text-sm font-semibold">Contraseña</span>
+          <div class="relative mt-1">
+            <input [type]="verContrasena() ? 'text' : 'password'" formControlName="contrasena"
+                   autocomplete="new-password" placeholder="Mínimo 8 caracteres"
+                   class="w-full rounded-2xl bg-white px-4 py-3 pr-12 outline-none border-2 transition"
+                   [class.border-red-400]="invalido('contrasena')" [class.border-transparent]="!invalido('contrasena')">
+            <button type="button" (click)="verContrasena.set(!verContrasena())"
+                    [attr.aria-label]="verContrasena() ? 'Ocultar contraseña' : 'Mostrar contraseña'"
+                    class="absolute right-3 top-1/2 -translate-y-1/2 text-nixta-cafe/60">
+              <span class="material-symbols-rounded">{{ verContrasena() ? 'visibility_off' : 'visibility' }}</span>
+            </button>
+          </div>
+          @if (invalido('contrasena')) {
+            <span class="text-xs text-red-600">Mínimo 8 caracteres</span>
+          }
+        </label>
+        <label class="block">
+          <span class="text-sm font-semibold">Confirmar contraseña</span>
+          <input [type]="verContrasena() ? 'text' : 'password'" formControlName="confirmar" autocomplete="new-password"
+                 class="mt-1 w-full rounded-2xl bg-white px-4 py-3 outline-none border-2 transition"
+                 [class.border-red-400]="contrasenasDiferentes || invalido('confirmar')"
+                 [class.border-transparent]="!(contrasenasDiferentes || invalido('confirmar'))">
+          @if (contrasenasDiferentes) {
+            <span class="text-xs text-red-600">Las contraseñas no coinciden</span>
+          }
+        </label>
+      </div>
+
+      <label class="block">
+        <span class="text-sm font-semibold">Dirección <span class="font-normal opacity-60">(opcional)</span></span>
+        <input type="text" formControlName="direccion" autocomplete="street-address" placeholder="Calle, número y colonia en León"
+               class="mt-1 w-full rounded-2xl bg-white px-4 py-3 outline-none border-2 border-transparent">
+      </label>
+
+      <label class="block">
+        <span class="text-sm font-semibold">Código de invitación <span class="font-normal opacity-60">(opcional)</span></span>
+        <input type="text" formControlName="codigo_invitacion" placeholder="JUDITH20"
+               class="mt-1 w-full rounded-2xl bg-white px-4 py-3 uppercase outline-none border-2 border-transparent">
+        <span class="text-xs opacity-70">Si alguien te invitó, ambos reciben $20 de saldo con tu primer pedido.</span>
+      </label>
+
+      @if (error()) {
+        <div class="rounded-2xl bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700">{{ error() }}</div>
+      }
+
+      <button type="submit" [disabled]="enviando()"
+              class="w-full rounded-full bg-nixta-verde text-white font-semibold py-3 shadow-sm
+                     hover:brightness-110 active:scale-[0.98] transition disabled:opacity-60">
+        {{ enviando() ? 'Creando tu cuenta…' : 'Registrarme' }}
+      </button>
+
+      <p class="text-center text-sm">
+        ¿Ya tienes una cuenta?
+        <a routerLink="/login" class="font-semibold text-nixta-verde underline underline-offset-4">Inicia sesión</a>
+      </p>
+    </form>
+  </section>
+</main>

@@ -1,0 +1,12 @@
+<header class="bg-nixta-naranja rounded-b-3xl px-5 pt-6 pb-7 lg:rounded-3xl lg:mt-6 lg:px-8">
+  @if (regresar()) {
+    <button (click)="volver()" aria-label="Regresar"
+            class="mb-3 w-9 h-9 grid place-items-center rounded-full bg-white/90 text-nixta-cafe shadow-sm hover:bg-white">
+      <span class="material-symbols-rounded text-xl">arrow_back</span>
+    </button>
+  }
+  <h1 class="text-2xl lg:text-3xl font-extrabold text-nixta-cafe">{{ titulo() }}</h1>
+  @if (subtitulo()) {
+    <p class="mt-1 text-sm font-medium text-nixta-cafe/80">{{ subtitulo() }}</p>
+  }
+</header>
